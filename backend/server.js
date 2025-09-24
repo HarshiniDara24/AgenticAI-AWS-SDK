@@ -15,7 +15,7 @@ const REGION = process.env.AWS_REGION || "us-east-1";
 // Bedrock Client
 const bedrockClient = new BedrockRuntimeClient({ region: REGION });
 
-// ---------- Claude Call Helper ----------
+// Claude Call Helper 
 async function callClaude(prompt) {
   const modelId = "anthropic.claude-3-haiku-20240307-v1:0";
 
@@ -43,7 +43,7 @@ async function callClaude(prompt) {
   return responseBody.content[0].text;
 }
 
-// ---------- JSON Extraction ----------
+
 function extractJSON(text) {
   if (!text || typeof text !== "string") return {};
   try {
@@ -59,7 +59,7 @@ function extractJSON(text) {
   }
 }
 
-// ---------- Date Utils ----------
+
 function validateDateFormat(dateString) {
   const regex = /^\d{2}\/\d{2}\/\d{2}$/;
   return regex.test(dateString);
@@ -76,12 +76,12 @@ function calculateDaysDifference(startDate, endDate) {
   return Math.ceil(diffMs / (1000 * 3600 * 24)) + 1;
 }
 
-// ---------- Global Storage ----------
+
 let lastRecommendations = [];
 let tripDates = { start: "", end: "" };
 let tripCity = "";
 
-// ---------- Routes ----------
+
 
 // /prompt
 app.post("/prompt", async (req, res) => {
@@ -229,7 +229,7 @@ Return structured plan as plain text (not JSON).`;
   }
 });
 
-// /detailedTrip (NEW ROUTE)
+// /detailedTrip 
 app.post("/detailedTrip", async (req, res) => {
   const { city, start_date, end_date } = req.body;
 
@@ -269,7 +269,7 @@ Format the response as structured plain text, not JSON.
   }
 });
 
-// ---------- Start Server ----------
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
