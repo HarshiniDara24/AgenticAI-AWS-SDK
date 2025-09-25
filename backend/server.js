@@ -4,7 +4,6 @@ const cors = require("cors");
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 
 dotenv.config();
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -15,10 +14,9 @@ const REGION = process.env.AWS_REGION || "us-east-1";
 // Bedrock Client
 const bedrockClient = new BedrockRuntimeClient({ region: REGION });
 
-// Claude Call Helper 
+// Claude call 
 async function callClaude(prompt) {
   const modelId = "anthropic.claude-3-haiku-20240307-v1:0";
-
   const command = new InvokeModelCommand({
     modelId,
     contentType: "application/json",
@@ -27,249 +25,140 @@ async function callClaude(prompt) {
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: 2000,
       temperature: 0.7,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: prompt }],
-        },
-      ],
+      messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
     }),
   });
 
   const response = await bedrockClient.send(command);
   const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-  // Claude outputs structured text
   return responseBody.content[0].text;
 }
 
-
 function extractJSON(text) {
-  if (!text || typeof text !== "string") return {};
   try {
-    const fenceMatch = text.match(/```(?:\w+)?([\s\S]*?)```/i);
-    if (fenceMatch) return JSON.parse(fenceMatch[1].trim());
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return JSON.parse(text.trim());
   } catch (err) {
-    console.error("❌ Failed to parse Claude JSON:", err.message);
-    console.error("Raw text was:\n", text);
-    return {};
+    console.error(" JSON Parse Error:", err.message);
   }
+  return {};
 }
 
-
-function validateDateFormat(dateString) {
-  const regex = /^\d{2}\/\d{2}\/\d{2}$/;
-  return regex.test(dateString);
-}
 
 function calculateDaysDifference(startDate, endDate) {
-  const [startDay, startMonth, startYear] = startDate.split("/").map(n => parseInt(n));
-  const [endDay, endMonth, endYear] = endDate.split("/").map(n => parseInt(n));
-  const startFullYear = startYear < 50 ? 2000 + startYear : 1900 + startYear;
-  const endFullYear = endYear < 50 ? 2000 + endYear : 1900 + endYear;
-  const start = new Date(startFullYear, startMonth - 1, startDay);
-  const end = new Date(endFullYear, endMonth - 1, endDay);
-  const diffMs = end.getTime() - start.getTime();
-  return Math.ceil(diffMs / (1000 * 3600 * 24)) + 1;
+  const [sd, sm, sy] = startDate.split("/").map(Number);
+  const [ed, em, ey] = endDate.split("/").map(Number);
+  const sYear = sy < 50 ? 2000 + sy : 1900 + sy;
+  const eYear = ey < 50 ? 2000 + ey : 1900 + ey;
+  const s = new Date(sYear, sm - 1, sd);
+  const e = new Date(eYear, em - 1, ed);
+  return Math.ceil((e - s) / (1000 * 3600 * 24)) + 1;
 }
 
+// ---------------- Agents ----------------
 
-let lastRecommendations = [];
-let tripDates = { start: "", end: "" };
-let tripCity = "";
-
-
-
-// /prompt
-app.post("/prompt", async (req, res) => {
-  const { city, start_date, end_date } = req.body;
-
-  if (!city) return res.status(400).json({ error: "City is required" });
-  if (!start_date || !end_date)
-    return res.status(400).json({ error: "Start and end dates are required" });
-  if (!validateDateFormat(start_date) || !validateDateFormat(end_date))
-    return res.status(400).json({ error: "Dates must be in dd/mm/yy format" });
-
-  tripDates.start = start_date;
-  tripDates.end = end_date;
-  tripCity = city;
-
-  const totalDays = calculateDaysDifference(start_date, end_date);
+// TourAgent
+async function TourAgent(city, totalDays, excludePlaces = []) {
+  const exclusionText = excludePlaces.length
+    ? `Exclude these places: ${excludePlaces.join(", ")}.`
+    : "";
 
   const prompt = `
-Plan a trip for ${city} from ${start_date} to ${end_date}.
-Distribute tourist places across ${totalDays} days.
-Each day must include 3 to 4 famous tourist places.
-
-Return strictly valid JSON in this format:
-{
-  "days": [
-    { "day": 1, "date": "YYYY-MM-DD", "places": ["Place 1", "Place 2", "Place 3"] },
-    { "day": 2, "date": "YYYY-MM-DD", "places": ["Place 4", "Place 5", "Place 6"] }
-  ]
+You are a TourAgent.
+List tourist attractions in ${city} for ${totalDays} days.
+${exclusionText}
+Return JSON: { "days": [ { "day": 1, "places": ["Place A", "Place B"] } ] }
+  `;
+  const tourText = await callClaude(prompt);
+  return extractJSON(tourText);
 }
-`;
 
-  try {
-    const raw = await callClaude(prompt);
-    let recommendations = extractJSON(raw);
+// WeatherAgent
+async function WeatherAgent(city, tourData) {
+  const allPlaces = tourData.days?.flatMap(d => d.places) || [];
+  const prompt = `
+You are a WeatherAgent.
+Provide weather forecasts for ${city} covering these places: ${allPlaces.join(", ")}.
+Return JSON array: [ { "place": "Place A", "date": "YYYY-MM-DD", "weather": "Rainy", "temperature": "20°C" } ]
+  `;
+  const weatherText = await callClaude(prompt);
+  const weatherData = extractJSON(weatherText);
 
-    lastRecommendations = recommendations.days?.flatMap(day => day.places) || [];
+  // Feedback: bad weather
+  const badWeatherPlaces = weatherData
+    .filter(w => w.weather.toLowerCase().includes("rain"))
+    .map(w => w.place);
 
-    res.json({
-      city,
-      recommendations,
-      start_date,
-      end_date,
-      total_days: totalDays,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Error fetching tourist places", details: err.message });
-  }
-});
-
-// /temp
-app.post("/temp", async (req, res) => {
-  let { cities, city } = req.body;
-
-  if (!cities || !Array.isArray(cities) || cities.length === 0) {
-    if (lastRecommendations.length === 0) {
-      if (!city) return res.status(400).json({ error: "No city info available" });
-      return res.status(400).json({ error: "Call /prompt first to get tourist places" });
-    }
-    cities = lastRecommendations;
+  if (badWeatherPlaces.length > 0) {
+    console.log(" Bad weather detected, notifying TourAgent...");
+    const newTourData = await TourAgent(city, tourData.days.length, badWeatherPlaces);
+    return await WeatherAgent(city, newTourData);
   }
 
-  if (!Array.isArray(cities)) cities = [cities];
+  return weatherData;
+}
 
-  const prompt = `Give the current temperature and weather condition (e.g. cloudy, sunny) for each of these places: ${cities.join(
-    ", "
-  )}.
-Return strictly valid JSON:
-[
-  { "city": "Place 1", "temperature": "25°C", "Weather Condition": "Sunny" }
-]`;
+// TransportAgent
+async function TransportAgent(city, weatherData) {
+  const allPlaces = weatherData.map(w => w.place);
+  const prompt = `
+You are a TransportAgent.
+Suggest local transport for these places in ${city}, considering weather conditions.
+Return JSON array: [ { "place": "Place A", "fromMajestic": "Metro", "fromAirport": "Taxi" } ]
+  `;
+  const transportText = await callClaude(prompt);
+  return extractJSON(transportText);
+}
 
-  try {
-    const raw = await callClaude(prompt);
-    const temperatureData = extractJSON(raw);
-    res.json({ results: temperatureData });
-  } catch (err) {
-    res.status(500).json({ error: "Error fetching temperature", details: err.message });
-  }
-});
+// PlannerAgent (Final)
+async function PlannerAgent(city, tourData, weatherData, transportData) {
+  const finalPrompt = `
+You are a PlannerAgent.
+Create a day-wise detailed trip plan for ${city} (${tourData.days.length} days).
+Use this info:
+- Tourist places: ${JSON.stringify(tourData)}
+- Weather: ${JSON.stringify(weatherData)}
+- Transport: ${JSON.stringify(transportData)}
+Include:
+- Places
+- Transport
+- Weather
+- Activities
+- Costs
+- Tips
+Return as structured plain text.
+  `;
+  return await callClaude(finalPrompt);
+}
 
-// /transport
-app.post("/transport", async (req, res) => {
-  const { places } = req.body;
-
-  if (!places || !Array.isArray(places) || places.length === 0) {
-    if (!lastRecommendations.length || !tripCity) {
-      return res.status(400).json({ error: "No places info" });
-    }
-  }
-
-  const targetPlaces =
-    places && Array.isArray(places) && places.length > 0 ? places : lastRecommendations;
-
-  const prompt = `Provide the best transportation method to reach each place in ${tripCity}.
-For places: ${targetPlaces.join(", ")}, from Majestic and Kempegowda Airport.
-Return strictly valid JSON array:
-[
-  { "place": "Place 1", "fromMajestic": "Bus/Metro", "fromAirport": "Taxi/Uber" }
-]`;
-
-  try {
-    const raw = await callClaude(prompt);
-    const transportInfo = extractJSON(raw);
-    res.json({ transport: transportInfo });
-  } catch (err) {
-    res.status(500).json({ error: "Error fetching transport info", details: err.message });
-  }
-});
-
-// /finalTrip
-app.post("/finalTrip", async (req, res) => {
-  const { transportData, temperatureData } = req.body;
-
-  if (!tripDates.start || !tripDates.end || !tripCity) {
-    return res.status(400).json({ error: "Trip info not initialized. Call /prompt first." });
-  }
-
-  const totalDays = calculateDaysDifference(tripDates.start, tripDates.end);
-
-  const prompt = `Create a detailed day-wise trip plan for ${tripCity} from ${tripDates.start} to ${tripDates.end} (${totalDays} days).
-Strictly only give Daywise plan (Day 1: ...).
-Use transport info: ${JSON.stringify(transportData || [])}.
-${temperatureData ? `Use weather info: ${JSON.stringify(temperatureData)}` : ""}
-Each day must include:
-- places
-- transport
-- weather
-- activities
-- costs
-- tips
-
-Return structured plan as plain text (not JSON).`;
-
-  try {
-    const raw = await callClaude(prompt);
-    res.json({
-      city: tripCity,
-      start_date: tripDates.start,
-      end_date: tripDates.end,
-      total_days: totalDays,
-      trip_plan: raw,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Error generating trip plan", details: err.message });
-  }
-});
-
-// /detailedTrip 
-app.post("/detailedTrip", async (req, res) => {
-  const { city, start_date, end_date } = req.body;
-
-  if (!city) return res.status(400).json({ error: "City is required" });
-  if (!start_date || !end_date)
-    return res.status(400).json({ error: "Start and end dates are required" });
-  if (!validateDateFormat(start_date) || !validateDateFormat(end_date))
-    return res.status(400).json({ error: "Dates must be in dd/mm/yy format" });
-
+// ---------------- Orchestrator for agent-to-agent flow ----------------
+async function AgentOrchestrator(city, start_date, end_date) {
   const totalDays = calculateDaysDifference(start_date, end_date);
 
-  const prompt = `
-Create a very detailed day-wise trip plan for ${city} from ${start_date} to ${end_date} (${totalDays} days).
+  // TourAgent → WeatherAgent (feedback built-in) → TransportAgent
+  const tourData = await TourAgent(city, totalDays);
+  const weatherData = await WeatherAgent(city, tourData);
+  const transportData = await TransportAgent(city, weatherData);
 
-Each day must include:
-- tourist places to visit
-- local transport options
-- expected weather (use reasonable assumptions)
-- suggested activities
-- approximate costs (in local currency)
-- travel tips
+  // PlannerAgent final synthesis
+  return await PlannerAgent(city, tourData, weatherData, transportData);
+}
 
-Format the response as structured plain text, not JSON.
-`;
+// ---------------- API ----------------
+app.post("/agentTrip", async (req, res) => {
+  const { city, start_date, end_date } = req.body;
+  if (!city || !start_date || !end_date)
+    return res.status(400).json({ error: "City, start_date, end_date required" });
 
   try {
-    const raw = await callClaude(prompt);
-    res.json({
-      city,
-      start_date,
-      end_date,
-      total_days: totalDays,
-      trip_plan: raw,
-    });
+    const tripPlan = await AgentOrchestrator(city, start_date, end_date);
+    res.json({ city, start_date, end_date, tripPlan });
   } catch (err) {
-    res.status(500).json({ error: "Error generating detailed trip plan", details: err.message });
+    res.status(500).json({ error: "Agentic planning failed", details: err.message });
   }
 });
 
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(` Agentic AI server running on http://localhost:${PORT}`);
 });
