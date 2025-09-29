@@ -179,6 +179,47 @@ app.post("/agentTrip", async (req, res) => {
   }
 });
 
+app.post("/tourOnly", async (req, res) => {
+  const { city, start_date, end_date } = req.body;
+  if (!city || !start_date || !end_date) {
+    return res.status(400).json({ error: "City, start_date, end_date required" });
+  }
+
+  const totalDays = calculateDaysDifference(start_date, end_date);
+
+  try {
+    const tourData = await TourAgent(city, totalDays);
+    res.json({ city, start_date, end_date, tourData });
+  } catch (err) {
+    console.error("Error fetching tour:", err);
+    res.status(500).json({ error: "Failed to fetch tour places" });
+  }
+});
+
+
+// ---------------- Weather Only API ----------------
+app.post("/weatherOnly", async (req, res) => {
+  const { city, start_date, end_date } = req.body;
+  if (!city || !start_date || !end_date) {
+    return res.status(400).json({ error: "City, start_date, end_date required" });
+  }
+
+  const totalDays = calculateDaysDifference(start_date, end_date);
+
+  try {
+    // First, get places so we know what to fetch weather for
+    const tourData = await TourAgent(city, totalDays);
+    const allPlaces = tourData.days.flatMap(d => d.places);
+
+    const weatherData = await WeatherAgent(city, allPlaces);
+
+    res.json({ city, start_date, end_date, weatherData });
+  } catch (err) {
+    console.error("Error fetching weather:", err);
+    res.status(500).json({ error: "Failed to fetch weather data" });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Agentic AI server running on http://localhost:${PORT}`);
