@@ -132,3 +132,25 @@ input {
   background-color: #fff; /* White background */
   color: #000;           /* Black text */
 }
+
+.trip-plan-box p strong {
+  color: #0073c0; /* blue color */
+  font-weight: bold;
+  font-size: 18px;
+}
+.checkbox-group {
+  display: flex;           /* horizontal layout */
+  gap: 40px;               /* space between checkbox-label pairs */
+  align-items: center;     /* vertically align text with checkbox */
+  margin-top: 10px;
+  flex-wrap: nowrap;       /* keep everything in one line */
+}
+
+.checkbox-group label {
+  display: flex;           /* align checkbox and text */
+  align-items: center;     /* vertically center */
+  gap: 5px;                /* space between checkbox and text */
+  font-weight: 500;
+  font-size: 15px;
+  white-space: nowrap;     /* prevent text from wrapping to multiple lines */
+}
