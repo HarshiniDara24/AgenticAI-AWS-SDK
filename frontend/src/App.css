@@ -139,18 +139,18 @@ input {
   font-size: 18px;
 }
 .checkbox-group {
-  display: flex;           /* horizontal layout */
-  gap: 40px;               /* space between checkbox-label pairs */
-  align-items: center;     /* vertically align text with checkbox */
+  display: flex;           
+  gap: 40px;               
+  align-items: center;    
   margin-top: 10px;
-  flex-wrap: nowrap;       /* keep everything in one line */
+  flex-wrap: nowrap;      
 }
 
 .checkbox-group label {
-  display: flex;           /* align checkbox and text */
-  align-items: center;     /* vertically center */
-  gap: 5px;                /* space between checkbox and text */
+  display: flex;           
+  align-items: center;    
+  gap: 5px;                
   font-weight: 500;
   font-size: 15px;
-  white-space: nowrap;     /* prevent text from wrapping to multiple lines */
+  white-space: nowrap;   
 }
